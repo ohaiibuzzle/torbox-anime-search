@@ -153,7 +153,7 @@ async function runSearch() {
   renderResults(cached);
 }
 
-// display results + file selection
+// display results
 
 function renderResults(cached) {
   _cached = cached;
@@ -164,56 +164,112 @@ function renderResults(cached) {
     const card = document.createElement('div');
     card.className = 't-card';
     card.id = `tc-${idx}`;
-
-    const filesHtml = torrent.files.map((f, fIdx) => `
-      <div class="f-item" id="fi-${idx}-${fIdx}" onclick="selectFile(${idx}, ${fIdx})">
-        <div class="f-name" title="${esc(f.name || f.short_name)}">${esc(f.short_name || f.name || ('File ' + f.id))}</div>
-        <div class="f-size">${fmtBytes(f.size)}</div>
-      </div>
-    `).join('');
+    card.onclick = () => openTorrent(idx);
 
     card.innerHTML = `
-      <div class="t-header" onclick="toggleCard(${idx})">
+      <div class="t-header">
         <div class="t-title" title="${esc(torrent.name)}">${esc(torrent.name)}</div>
         <div class="t-meta">
           ${torrent.seeders ? `<span class="seed-dot" title="${torrent.seeders} seeders"></span><span>${torrent.seeders}</span>` : ''}
           <span>${fmtBytes(torrent.size)}</span>
           <span class="pill pill-cached">CACHED</span>
-          <span class="chevron">▼</span>
         </div>
       </div>
-      <div class="f-list">${filesHtml}</div>
     `;
 
     container.appendChild(card);
   });
 }
 
-function toggleCard(idx) {
-  const card = $(`tc-${idx}`);
-  const isOpen = card.classList.contains('open');
-  document.querySelectorAll('.t-card').forEach(c => c.classList.remove('open'));
-  if (!isOpen) card.classList.add('open');
+// torrent detail page: torrentinfo + mylist/createtorrent run in parallel
+
+async function openTorrent(idx) {
+  const torrent = _cached[idx];
+  const key = $('apiKey').value.trim();
+
+  $('results').style.display = 'none';
+  $('detailContent').innerHTML = '';
+  $('watchWrap').style.display = 'block';
+  setStatus('<span class="spin"></span> Fetching torrent info… (may take up to 30s)');
+
+  const [filesResult, idResult] = await Promise.allSettled([
+    fetchTorrentFiles(torrent.hash, key),
+    ensureTorrentId(torrent, key),
+  ]);
+
+  if (filesResult.status === 'rejected') {
+    setStatus(`Failed to load files: ${esc(filesResult.reason?.message)}`, 'error');
+    return;
+  }
+  if (idResult.status === 'rejected') {
+    setStatus(`Failed to add torrent: ${esc(idResult.reason?.message)}`, 'error');
+    return;
+  }
+
+  const files = filesResult.value;
+  const torrentId = idResult.value;
+
+  if (!files.length) {
+    setStatus('No files found in this torrent.', 'error');
+    return;
+  }
+
+  if (files.length === 1) {
+    const f = files[0];
+    _streamUrl =
+      `https://api.torbox.app/v1/api/torrents/requestdl` +
+      `?token=${encodeURIComponent(key)}` +
+      `&torrent_id=${torrentId}` +
+      `&file_id=0&redirect=true`;
+
+    setStatus(`<span style="color:var(--success)">✓</span> Ready — <em>${esc(f.name)}</em>`, 'ok');
+    $('detailContent').innerHTML = `
+      <button id="copyBtn" onclick="copyLink()">Copy Link (for use with a media player)</button>
+      <div class="action-row">
+        <a id="watchLink" href="${esc(_streamUrl)}" target="_blank" rel="noopener" class="btn-outline">Download</a>
+        <button id="vlcBtn" class="btn-outline" onclick="openVlc()">Open in VLC</button>
+      </div>
+    `;
+  } else {
+    _streamUrl = '';
+    const zipUrl =
+      `https://api.torbox.app/v1/api/torrents/requestdl` +
+      `?token=${encodeURIComponent(key)}` +
+      `&torrent_id=${torrentId}` +
+      `&zip_link=true` +
+      `&redirect=true`;
+
+    setStatus(`<span style="color:var(--success)">✓</span> ${files.length} files found.`, 'ok');
+    const fileListHtml = files.map(f => `
+      <div class="f-item" style="cursor:default">
+        <div class="f-name" title="${esc(f.name)}">${esc(f.name)}</div>
+        <div class="f-size">${fmtBytes(f.size)}</div>
+      </div>
+    `).join('');
+    $('detailContent').innerHTML = `
+      <div class="action-row" style="margin-bottom:1rem">
+        <a href="${esc(zipUrl)}" target="_blank" rel="noopener" class="btn-outline">Download as ZIP</a>
+      </div>
+      <div class="f-list" style="max-height:300px;overflow-y:auto">${fileListHtml}</div>
+    `;
+  }
+
+  $('watchWrap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-// mylist check → createtorrent (if needed) → stream links
+async function fetchTorrentFiles(hash, key) {
+  const url = `https://api.torbox.app/v1/api/torrents/torrentinfo?hash=${hash}&timeout=30&use_cache_lookup=true`;
+  const res = await fetch(PROXY + encodeURIComponent(url), {
+    headers: { 'Authorization': `Bearer ${key}` },
+  });
+  if (!res.ok) throw new Error(`TorBox ${res.status}`);
+  const json = await res.json();
+  if (!json.success) throw new Error(json.detail ?? 'Failed to load torrent info');
+  return json.data?.files ?? [];
+}
 
-async function selectFile(cardIdx, fileIdx) {
-  const key = $('apiKey').value.trim();
-  const torrent = _cached[cardIdx];
-  const f = torrent.files[fileIdx];
-  const fileId = f.id;
-  const fileName = f.name || f.short_name || String(f.id);
-
-  document.querySelectorAll('.f-item').forEach(el => el.classList.remove('selected'));
-  const fi = $(`fi-${cardIdx}-${fileIdx}`);
-  if (fi) fi.classList.add('selected');
-
-  $('watchWrap').style.display = 'none';
-  setStatus(`<span class="spin"></span> Checking your TorBox library…`);
-
-  // Check existing library first to avoid hitting the createtorrent rate limit (60/min)
-  let torrentId = null;
+async function ensureTorrentId(torrent, key) {
+  // Check existing library first to avoid the createtorrent rate limit (60/min)
   try {
     const res = await fetch(PROXY + encodeURIComponent('https://api.torbox.app/v1/api/torrents/mylist'), {
       headers: { 'Authorization': `Bearer ${key}` },
@@ -225,55 +281,34 @@ async function selectFile(cardIdx, fileIdx) {
           t.hash?.toLowerCase() === torrent.hash ||
           t.alternative_hashes?.some(h => h.toLowerCase() === torrent.hash)
         );
-        if (existing) torrentId = existing.id;
+        if (existing) return existing.id;
       }
     }
-  } catch { /* non-fatal — fall through to createtorrent */ }
+  } catch { /* fall through to createtorrent */ }
 
-  if (torrentId === null) {
-    setStatus(`<span class="spin"></span> Adding torrent to TorBox…`);
-    try {
-      const form = new FormData();
-      form.append('magnet', torrent.magnet);
-      form.append('add_only_if_cached', 'true');
+  const form = new FormData();
+  form.append('magnet', torrent.magnet);
+  form.append('add_only_if_cached', 'true');
 
-      const res = await fetch(PROXY + encodeURIComponent('https://api.torbox.app/v1/api/torrents/createtorrent'), {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${key}` },
-        body: form,
-      });
-
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`TorBox ${res.status}: ${txt}`);
-      }
-
-      const json = await res.json();
-      if (!json.success) throw new Error(json.detail ?? 'Failed to add torrent');
-      torrentId = json.data.torrent_id;
-    } catch (e) {
-      setStatus(`Failed to add torrent: ${e.message}`, 'error');
-      return;
-    }
+  const res = await fetch(PROXY + encodeURIComponent('https://api.torbox.app/v1/api/torrents/createtorrent'), {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}` },
+    body: form,
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`TorBox ${res.status}: ${txt}`);
   }
-
-  _streamUrl =
-    `https://api.torbox.app/v1/api/torrents/requestdl` +
-    `?token=${encodeURIComponent(key)}` +
-    `&torrent_id=${torrentId}` +
-    `&file_id=${fileId}` +
-    `&redirect=true`;
-
-  setStatus(`<span style="color:var(--success)">✓</span> Ready — <em>${esc(fileName)}</em>`, 'ok');
-
-  $('watchLink').href = _streamUrl;
-  $('results').style.display = 'none';
-  $('watchWrap').style.display = 'block';
-  $('watchWrap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.detail ?? 'Failed to add torrent');
+  return json.data.torrent_id;
 }
 
 function showResults() {
   $('results').style.display = '';
+  $('watchWrap').style.display = 'none';
+  $('detailContent').innerHTML = '';
+  setStatus('');
 }
 
 async function copyLink() {
