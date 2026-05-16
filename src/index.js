@@ -1,4 +1,5 @@
 const $ = id => document.getElementById(id);
+const PROXY = 'https://cors-proxy.ohaibuzzle-cloudflare.workers.dev/corsproxy/?apiurl=';
 let _cached = [];
 let _streamUrl = '';
 
@@ -93,7 +94,7 @@ async function runSearch() {
 
   let cacheData;
   try {
-    const res = await fetch('https://cors-proxy.ohaibuzzle-cloudflare.workers.dev/corsproxy/?apiurl=' + encodeURIComponent('https://api.torbox.app/v1/api/torrents/checkcached'), {
+    const res = await fetch(PROXY + encodeURIComponent('https://api.torbox.app/v1/api/torrents/checkcached'), {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${key}`,
@@ -195,7 +196,7 @@ function toggleCard(idx) {
   if (!isOpen) card.classList.add('open');
 }
 
-// add to toerbox + get stream link
+// mylist check → createtorrent (if needed) → stream links
 
 async function selectFile(cardIdx, fileIdx) {
   const key = $('apiKey').value.trim();
@@ -203,38 +204,57 @@ async function selectFile(cardIdx, fileIdx) {
   const f = torrent.files[fileIdx];
   const fileId = f.id;
   const fileName = f.name || f.short_name || String(f.id);
-  const magnet = torrent.magnet;
 
   document.querySelectorAll('.f-item').forEach(el => el.classList.remove('selected'));
   const fi = $(`fi-${cardIdx}-${fileIdx}`);
   if (fi) fi.classList.add('selected');
 
   $('watchWrap').style.display = 'none';
-  setStatus(`<span class="spin"></span> Adding torrent to TorBox…`);
+  setStatus(`<span class="spin"></span> Checking your TorBox library…`);
 
-  let torrentId;
+  // Check existing library first to avoid hitting the createtorrent rate limit (60/min)
+  let torrentId = null;
   try {
-    const form = new FormData();
-    form.append('magnet', magnet);
-    form.append('add_only_if_cached', 'true');
-
-    const res = await fetch('https://cors-proxy.ohaibuzzle-cloudflare.workers.dev/corsproxy/?apiurl=' + encodeURIComponent('https://api.torbox.app/v1/api/torrents/createtorrent'), {
-      method: 'POST',
+    const res = await fetch(PROXY + encodeURIComponent('https://api.torbox.app/v1/api/torrents/mylist'), {
       headers: { 'Authorization': `Bearer ${key}` },
-      body: form,
     });
-
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`TorBox ${res.status}: ${txt}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        const existing = json.data.find(t =>
+          t.hash?.toLowerCase() === torrent.hash ||
+          t.alternative_hashes?.some(h => h.toLowerCase() === torrent.hash)
+        );
+        if (existing) torrentId = existing.id;
+      }
     }
+  } catch { /* non-fatal — fall through to createtorrent */ }
 
-    const json = await res.json();
-    if (!json.success) throw new Error(json.detail ?? 'Failed to add torrent');
-    torrentId = json.data.torrent_id;
-  } catch (e) {
-    setStatus(`Failed to add torrent: ${e.message}`, 'error');
-    return;
+  if (torrentId === null) {
+    setStatus(`<span class="spin"></span> Adding torrent to TorBox…`);
+    try {
+      const form = new FormData();
+      form.append('magnet', torrent.magnet);
+      form.append('add_only_if_cached', 'true');
+
+      const res = await fetch(PROXY + encodeURIComponent('https://api.torbox.app/v1/api/torrents/createtorrent'), {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}` },
+        body: form,
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`TorBox ${res.status}: ${txt}`);
+      }
+
+      const json = await res.json();
+      if (!json.success) throw new Error(json.detail ?? 'Failed to add torrent');
+      torrentId = json.data.torrent_id;
+    } catch (e) {
+      setStatus(`Failed to add torrent: ${e.message}`, 'error');
+      return;
+    }
   }
 
   _streamUrl =
