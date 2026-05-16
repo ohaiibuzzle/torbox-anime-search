@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ThisThingStreams</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <header>
+    <h1>ThisThingStreams</h1>
+    <p>Bare minimum "streaming" website.</p>
+  </header>
+
+  <!-- API Key -->
+  <div class="card">
+    <div id="apiKeyWrap">
+      <div class="card-label-row">
+        <div class="card-label">TorBox API Key</div>
+        <span id="keySaved" class="key-saved">✓ Saved</span>
+      </div>
+      <input type="password" id="apiKey" placeholder="Paste your TorBox API key here" autocomplete="off"
+        spellcheck="false">
+    </div>
+
+    <div class="action-row">
+      <button id="clearKeyBtn" class="btn-outline" onclick="clearApiKey()" hidden>Clear Saved Key</button>
+    </div>
+  </div>
+
+  <!-- Search -->
+  <div class="card">
+    <div class="card-label">Search</div>
+    <div class="row">
+      <div class="field">
+        <div class="field-label">Query</div>
+        <input type="text" id="query" placeholder="e.g. Attack on Titan" autocomplete="off">
+      </div>
+      <div class="field narrow">
+        <div class="field-label">Category</div>
+        <select id="category">
+          <option value="anime">Anime</option>
+          <option value="anime_music_video">Anime MV</option>
+          <option value="audio">Audio</option>
+          <option value="literature">Literature</option>
+          <option value="live_action">Live Action</option>
+          <option value="pictures">Pictures</option>
+          <option value="software">Software</option>
+          <option value="">All</option>
+        </select>
+      </div>
+      <button id="searchBtn" onclick="runSearch()">Search</button>
+    </div>
+  </div>
+
+  <div id="status"></div>
+  <div id="results"></div>
+
+  <div id="watchWrap">
+    <hr class="divider">
+    <button id="copyBtn" onclick="copyLink()">Copy Link (for use with a media player)</button>
+    <div class="action-row">
+      <a id="watchLink" href="#" target="_blank" rel="noopener" class="btn-outline">Download</a>
+      <button id="vlcBtn" class="btn-outline" onclick="openVlc()">Open in VLC</button>
+    </div>
+    <button id="changeBtn" onclick="showResults()">← Change selection</button>
+  </div>
+
+  <script src="index.js"></script>
+
+</body>
+
+</html>
