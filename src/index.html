@@ -5,6 +5,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Torbox Anime Search</title>
+  <meta name="theme-color" content="#7c3aed">
+  <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -12,7 +14,7 @@
 
   <header>
     <h1>Torbox Anime Search</h1>
-    <p>Bare minimum "streaming" website.</p>
+    <p>Technically in the clear.</p>
   </header>
 
   <!-- API Key -->
@@ -70,6 +72,11 @@
   </div>
 
   <script src="index.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js");
+    }
+  </script>
 
 </body>
 
